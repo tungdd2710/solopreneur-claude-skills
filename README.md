@@ -1,4 +1,4 @@
-# claude-process-skills
+# solopreneur-claude-skills
 
 > **A collection of structured workflow skills for Claude Code.**
 
@@ -70,9 +70,9 @@ The `CLAUDE.md` in this repo contains rules that need no invocation — they app
 ## Install
 
 ```bash
-git clone https://github.com/tungdd2710/standard-process-claude-skill
-cp -r standard-process-claude-skill/skills/* ~/.claude/skills/
-cp standard-process-claude-skill/CLAUDE.md ./CLAUDE.md  # or merge into your existing one
+git clone https://github.com/tungdd2710/solopreneur-claude-skills
+cp -r solopreneur-claude-skills/skills/* ~/.claude/skills/
+cp solopreneur-claude-skills/CLAUDE.md ./CLAUDE.md  # or merge into your existing one
 ```
 
 Then add skill routing to your `CLAUDE.md`:
