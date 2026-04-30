@@ -1,0 +1,132 @@
+name: Fork Activity Report
+
+on:
+  schedule:
+    # 07:00 UTC daily (14:00 VN time)
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate fork activity report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: tungdd2710/standard-process-claude-skill
+        run: |
+          REPORT="FORK-ACTIVITY.md"
+          DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          OWNER="tungdd2710"
+          REPO_NAME="standard-process-claude-skill"
+
+          echo "# Fork Activity Report" > $REPORT
+          echo "" >> $REPORT
+          echo "_Last updated: $DATE_" >> $REPORT
+          echo "" >> $REPORT
+
+          # ── Repo stats ────────────────────────────────────────────────
+          STATS=$(gh api repos/$REPO --jq '{stars: .stargazers_count, forks: .forks_count, watchers: .subscribers_count}')
+          STARS=$(echo $STATS | jq -r '.stars')
+          FORKS=$(echo $STATS | jq -r '.forks')
+          WATCHERS=$(echo $STATS | jq -r '.watchers')
+
+          echo "## Overview" >> $REPORT
+          echo "" >> $REPORT
+          echo "| Metric | Count |" >> $REPORT
+          echo "|--------|-------|" >> $REPORT
+          echo "| ⭐ Stars | $STARS |" >> $REPORT
+          echo "| 🍴 Forks | $FORKS |" >> $REPORT
+          echo "| 👁 Watchers | $WATCHERS |" >> $REPORT
+          echo "" >> $REPORT
+
+          # ── PRs from forks ────────────────────────────────────────────
+          echo "## Pull Requests from Forks" >> $REPORT
+          echo "" >> $REPORT
+
+          PRS=$(gh api repos/$REPO/pulls?state=all\&per_page=50 \
+            --jq '[.[] | {number, title, user: .user.login, state, created: .created_at, merged: .merged_at, body: (.body // "")}]')
+
+          PR_COUNT=$(echo $PRS | jq 'length')
+          if [ "$PR_COUNT" -eq 0 ]; then
+            echo "_No pull requests yet._" >> $REPORT
+          else
+            echo $PRS | jq -r '.[] | "### PR #\(.number) — \(.title)\n\n- **Author:** \(.user)\n- **Status:** \(.state)\n- **Opened:** \(.created)\n\(.body | if . == "" then "" else "\n\(.)" end)\n"' >> $REPORT
+          fi
+          echo "" >> $REPORT
+
+          # ── Fork list + their commits ahead of master ─────────────────
+          echo "## Forks" >> $REPORT
+          echo "" >> $REPORT
+
+          FORK_LIST=$(gh api repos/$REPO/forks?per_page=100 \
+            --jq '[.[] | {user: .owner.login, fork_repo: .full_name, pushed: .pushed_at, default_branch: .default_branch}]')
+
+          FORK_COUNT=$(echo $FORK_LIST | jq 'length')
+          if [ "$FORK_COUNT" -eq 0 ]; then
+            echo "_No forks yet._" >> $REPORT
+          else
+            echo $FORK_LIST | jq -c '.[]' | while read -r FORK; do
+              FORK_USER=$(echo $FORK | jq -r '.user')
+              FORK_REPO=$(echo $FORK | jq -r '.fork_repo')
+              FORK_PUSHED=$(echo $FORK | jq -r '.pushed')
+              FORK_BRANCH=$(echo $FORK | jq -r '.default_branch')
+
+              echo "### [$FORK_USER](https://github.com/$FORK_REPO)" >> $REPORT
+              echo "" >> $REPORT
+              echo "- **Last pushed:** $FORK_PUSHED" >> $REPORT
+
+              # Compare fork against upstream to find their unique commits
+              COMPARE=$(gh api "repos/$FORK_REPO/compare/${OWNER}:master...${FORK_USER}:${FORK_BRANCH}" 2>/dev/null || echo '{"commits":[],"ahead_by":0}')
+              AHEAD=$(echo $COMPARE | jq -r '.ahead_by // 0')
+              COMMITS=$(echo $COMPARE | jq -r '.commits // [] | .[] | "  - `\(.sha[:7])` \(.commit.message | split("\n")[0])"')
+
+              if [ "$AHEAD" -gt 0 ]; then
+                echo "- **Commits ahead of upstream:** $AHEAD" >> $REPORT
+                echo "" >> $REPORT
+                echo "**Their changes:**" >> $REPORT
+                echo "" >> $REPORT
+                echo "$COMMITS" >> $REPORT
+              else
+                echo "- **Commits ahead of upstream:** 0 (in sync with upstream)" >> $REPORT
+              fi
+              echo "" >> $REPORT
+            done
+          fi
+
+          # ── Recent events (stars, forks, watches) ────────────────────
+          echo "## Recent Events (last 30 days)" >> $REPORT
+          echo "" >> $REPORT
+
+          CUTOFF=$(date -u -d "30 days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-30d +%Y-%m-%dT%H:%M:%SZ)
+
+          EVENTS=$(gh api repos/$REPO/events?per_page=100 \
+            --jq --arg cutoff "$CUTOFF" \
+            '[.[] | select(.created_at >= $cutoff) | {type, actor: .actor.login, at: .created_at}]')
+
+          EVENT_COUNT=$(echo $EVENTS | jq 'length')
+          if [ "$EVENT_COUNT" -eq 0 ]; then
+            echo "_No events in the last 30 days._" >> $REPORT
+          else
+            echo "| Event | Actor | Date |" >> $REPORT
+            echo "|-------|-------|------|" >> $REPORT
+            echo $EVENTS | jq -r '.[] | "| \(.type) | \(.actor) | \(.at[:10]) |"' >> $REPORT
+          fi
+
+          echo "" >> $REPORT
+          echo "---" >> $REPORT
+          echo "_Generated by [fork-activity.yml](.github/workflows/fork-activity.yml) [skip ci]_" >> $REPORT
+
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add FORK-ACTIVITY.md
+          git diff --cached --quiet && echo "No changes" || git commit -m "chore: update fork activity report [skip ci]" && git push
